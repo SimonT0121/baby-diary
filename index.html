@@ -154,6 +154,42 @@ textarea.inp{min-height:180px;resize:vertical;line-height:1.75}
 .spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--pri);
   border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- 批次 ---------- */
+.grp .row{flex-wrap:nowrap}
+.grp .inp{padding:9px 10px}
+.editgrid.g4{grid-template-columns:repeat(4,1fr)}
+.chip.todo{border-style:dashed}
+.chip.todo.on{background:#EF6351;border-color:#EF6351}
+.quick{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ---------- 列印（PDF） ---------- */
+#print{display:none}
+@media print{
+  @page{size:A4;margin:1.4cm 1.5cm}
+  html,body{background:#fff !important}
+  body>*:not(#print){display:none !important}
+  #print{display:block;color:#111;font-size:11pt;line-height:1.7}
+  .cover{height:24cm;display:flex;flex-direction:column;justify-content:center;align-items:center;
+    text-align:center;break-after:page}
+  .cover h1{font-family:"Noto Serif TC","Songti TC",PMingLiU,serif;font-size:30pt;margin:0 0 .4cm;color:#00806F}
+  .cover .rng{font-size:13pt;color:#444}
+  .cover .kids{margin-top:1cm;font-size:11pt;color:#555}
+  .pe{break-inside:avoid;margin:0 0 .7cm;padding-bottom:.5cm;border-bottom:.5pt solid #ccc}
+  .pe.pp{break-after:page;border-bottom:none}
+  .pe.pp:last-child{break-after:auto}
+  .pd{font-family:"Noto Serif TC","Songti TC",PMingLiU,serif;font-size:14pt;font-weight:700}
+  .pa{font-size:9.5pt;color:#00806F;margin-bottom:.2cm}
+  .pg{display:grid;gap:.25cm;margin:.2cm 0 .3cm}
+  .pg img{width:100%;object-fit:contain;display:block;break-inside:avoid}
+  .pg.c1{grid-template-columns:1fr}
+  .pg.c1 img{height:auto;max-height:15cm}
+  .pg.c2{grid-template-columns:1fr 1fr}
+  .pg.c2 img{height:7.5cm}
+  .pg.c3{grid-template-columns:1fr 1fr 1fr}
+  .pg.c3 img{height:5cm}
+  .pt{white-space:pre-wrap}
+}
 </style>
 </head>
 <body>
@@ -172,11 +208,12 @@ textarea.inp{min-height:180px;resize:vertical;line-height:1.75}
 
 <input type="file" id="picker" accept="image/*" multiple class="hide">
 <input type="file" id="zippicker" accept=".zip" class="hide">
+<div id="print"></div>
 
 <script>
 "use strict";
 /* =========================================================================
-   寶寶日記 v1.1  (2026-09-21)  備份改為兩段式
+   寶寶日記 v1.2  (2026-09-21)  批次依日期分篇、輸出 PDF
    單檔 PWA：資料全部存在手機瀏覽器 IndexedDB，不經任何伺服器。
    正式保存以匯出的 zip 備份檔為準。
    ========================================================================= */
@@ -330,7 +367,8 @@ async function compress(file){
 /* ---------------- 狀態 ---------------- */
 const S={
   kids:[], entries:[], settings:{fontScale:1,lastBackup:null,lastKidIds:[]},
-  filter:"all", view:"timeline", edit:null, detailId:null, urls:new Map()
+  filter:"all", view:"timeline", edit:null, detailId:null, urls:new Map(),
+  batch:null, onlyEmpty:false, ex:null
 };
 function url(pid){
   if(S.urls.has(pid)) return S.urls.get(pid);
@@ -354,6 +392,7 @@ async function boot(){
   if(m && m.v) S.settings=Object.assign(S.settings,m.v);
   document.documentElement.style.setProperty("--fs",(16*S.settings.fontScale)+"px");
   await purgeTrash();
+  await sweepOrphans();
   if(!S.kids.length){ S.view="setup"; render(); return; }
   await handleShare();
   render();
@@ -373,6 +412,17 @@ async function purgeTrash(){
   S.entries=keep;
 }
 
+/* 取消、當機留下的孤兒照片：沒被日記也沒被草稿引用的，清掉 */
+async function sweepOrphans(){
+  const keep=new Set();
+  S.entries.forEach(e=>e.photos.forEach(p=>keep.add(p.id)));
+  const d=readDraft();
+  if(d && d.e) (d.e.photos||[]).forEach(p=>keep.add(p.id));
+  if(d && d.b) (d.b.items||[]).forEach(p=>keep.add(p.id));
+  const keys=await idb("photos","readonly",st=>st.getAllKeys());
+  for(const k of keys||[]) if(!keep.has(k)) await dbDel("photos",k);
+}
+
 /* ---------------- 從 Google 相簿分享進來 ---------------- */
 async function handleShare(){
   const q=new URLSearchParams(location.search);
@@ -380,27 +430,34 @@ async function handleShare(){
   history.replaceState(null,"",location.pathname);
   const items=await dbAll("inbox");
   if(!items.length) return;
-  await dbPut("meta",{k:"noop",v:1});
-  await newEntry();
-  busy(true,"處理照片…");
-  for(const it of items){
-    try{ await addPhotoFile(new File([it.blob],it.name||"shared.jpg",{type:it.blob.type||"image/jpeg"})); }
-    catch(e){ /* 跳過壞檔 */ }
-    await dbDel("inbox",it.id);
-  }
-  busy(false);
+  const files=items.map(it=>new File([it.blob],it.name||"shared.jpg",{type:it.blob.type||"image/jpeg"}));
+  for(const it of items) await dbDel("inbox",it.id);
+  await startBatch(files);
 }
 
 /* ---------------- 草稿 ---------------- */
 const DRAFT="babydiary_draft";
 function saveDraft(){
-  if(!S.edit) return;
-  try{ localStorage.setItem(DRAFT,JSON.stringify({t:Date.now(),e:S.edit})); }catch(e){}
+  const payload = S.view==="batch" && S.batch ? {t:Date.now(),b:S.batch}
+                : S.edit ? {t:Date.now(),e:S.edit} : null;
+  if(!payload) return;
+  try{ localStorage.setItem(DRAFT,JSON.stringify(payload)); }catch(e){}
 }
+function readDraft(){ try{ return JSON.parse(localStorage.getItem(DRAFT)||"null"); }catch(e){ return null; } }
 function clearDraft(){ try{ localStorage.removeItem(DRAFT); }catch(e){} }
 function checkDraft(){
   if(S.view!=="timeline") return;
-  let d; try{ d=JSON.parse(localStorage.getItem(DRAFT)||"null"); }catch(e){ return; }
+  const d=readDraft();
+  if(d && d.b && d.b.items && d.b.items.length){
+    const m=modal('<h3>上次有一批照片還沒存</h3><p class="hint">'+d.b.items.length+' 張照片。要繼續嗎？</p>'+
+      '<div class="row" style="margin-top:14px"><button class="btn" id="dyes" style="flex:1">繼續</button>'+
+      '<button class="btn ghost" id="dno" style="flex:1">丟掉</button></div>');
+    m.querySelector("#dyes").onclick=async()=>{ closeModal(); S.batch=d.b; S.view="batch";
+      await primeUrls(S.batch.items.map(p=>p.id)); render(); };
+    m.querySelector("#dno").onclick=async()=>{ closeModal(); clearDraft();
+      for(const p of d.b.items) await dbDel("photos",p.id); };
+    return;
+  }
   if(!d || !d.e) return;
   const hasStuff=(d.e.text||"").trim() || (d.e.photos||[]).length;
   if(!hasStuff){ clearDraft(); return; }
@@ -419,13 +476,15 @@ function render(){
   $("back").classList.toggle("hide", S.view==="timeline"||S.view==="setup");
   $("gear").classList.toggle("hide", S.view!=="timeline");
   $("fab").classList.toggle("hide", S.view!=="timeline");
-  $("kidbar").classList.toggle("hide", S.view!=="timeline" || S.kids.length<2);
+  $("kidbar").classList.toggle("hide", S.view!=="timeline" || (S.kids.length<2 && !pendingCount()));
   if(S.view==="timeline"){ $("title").innerHTML="寶寶日記"+todayAges(); renderKidbar(); v.innerHTML=timelineHTML(); bindTimeline(); }
   else if(S.view==="setup"){ $("title").textContent="開始使用"; v.innerHTML=setupHTML(); bindSetup(); }
   else if(S.view==="edit"){ $("title").textContent=S.edit.id?"編輯日記":"新增日記"; v.innerHTML=editHTML(); bindEdit(); }
   else if(S.view==="detail"){ $("title").textContent="日記"; v.innerHTML=detailHTML(); bindDetail(); }
   else if(S.view==="settings"){ $("title").textContent="設定"; v.innerHTML=settingsHTML(); bindSettings(); }
   else if(S.view==="trash"){ $("title").textContent="最近刪除"; v.innerHTML=trashHTML(); bindTrash(); }
+  else if(S.view==="batch"){ $("title").textContent="新增照片"; v.innerHTML=batchHTML(); bindBatch(); }
+  else if(S.view==="export"){ $("title").textContent="輸出 PDF"; v.innerHTML=exportHTML(); bindExport(); }
   window.scrollTo(0,0);
 }
 function todayAges(){
@@ -433,17 +492,22 @@ function todayAges(){
   const parts=S.kids.filter(k=>k.birth).map(k=>esc(k.name)+" "+ageText(k.birth,t));
   return parts.length ? '<div class="sub">'+parts.join("　·　")+"</div>" : "";
 }
+function pendingCount(){ return liveEntries().filter(e=>!(e.text||"").trim()).length; }
 function renderKidbar(){
   const bar=$("kidbar");
   bar.innerHTML='<button class="chip'+(S.filter==="all"?" on":"")+'" data-k="all">全部</button>'+
     S.kids.map(k=>'<button class="chip'+(S.filter===k.id?" on":"")+'" data-k="'+k.id+'">'+esc(k.name)+"</button>").join("");
-  bar.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{ S.filter=b.dataset.k; render(); });
+  const n=pendingCount();
+  if(n || S.onlyEmpty) bar.innerHTML+='<button class="chip todo'+(S.onlyEmpty?" on":"")+'" id="todo">✎ 待補文字 '+n+"</button>";
+  bar.querySelectorAll(".chip[data-k]").forEach(b=>b.onclick=()=>{ S.filter=b.dataset.k; render(); });
+  const t=$("todo"); if(t) t.onclick=()=>{ S.onlyEmpty=!S.onlyEmpty; render(); };
 }
 
 /* ---- 時間軸 ---- */
 function timelineHTML(){
   let list=liveEntries();
   if(S.filter!=="all") list=list.filter(e=>e.kidIds.includes(S.filter));
+  if(S.onlyEmpty) list=list.filter(e=>!(e.text||"").trim());
   list.sort((a,b)=> a.date===b.date ? b.created-a.created : (a.date<b.date?1:-1));
   primeUrls(list.flatMap(e=>e.photos.slice(0,4).map(p=>p.id))).then(()=>{
     document.querySelectorAll("img[data-pid]").forEach(im=>{
@@ -451,6 +515,7 @@ function timelineHTML(){
     });
   });
   let html=bannerHTML();
+  if(!list.length && S.onlyEmpty) return html+'<div class="empty-state">文字都補完了。</div>';
   if(!list.length) return html+'<div class="empty-state">還沒有日記。<br>按右下角的 ＋，或在 Google 相簿選照片分享到「寶寶日記」。</div>';
   let cur="";
   for(const e of list){
@@ -484,7 +549,7 @@ function cardHTML(e){
     '<div class="meta"><span class="date">'+fmtDate(e.date)+"</span>"+
     ages.map(a=>'<span class="age">'+a+"</span>").join("")+"</div>"+
     thumbs+
-    '<p class="txt'+(txt?"":" empty")+'">'+(txt?esc(txt):"（尚未寫文字）")+"</p></div>";
+    '<p class="txt'+(txt?"":" empty")+'">'+(txt?esc(txt):"（尚未寫文字，點進去補）")+"</p></div>";
 }
 function bindTimeline(){
   const bk=$("bkbtn"); if(bk) bk.onclick=()=>{ S.view="settings"; render(); };
@@ -631,14 +696,18 @@ function dragSort(){
     });
   });
 }
-async function addPhotoFile(file){
+async function processFile(file){
   const shot=await exifDate(file);
   const dup=findDup(file.size,shot);
   const {blob,w,h}=await compress(file);
   const id=uid();
   await dbPut("photos",{id,blob});
   S.urls.set(id,URL.createObjectURL(blob));
-  S.edit.photos.push({id,w,h,size:blob.size,shot:shot||null,orig:file.size});
+  return {photo:{id,w,h,size:blob.size,shot:shot||null,orig:file.size},dup};
+}
+async function addPhotoFile(file){
+  const {photo,dup}=await processFile(file);
+  S.edit.photos.push(photo);
   if(!S.edit.dateManual){
     const all=S.edit.photos.map(p=>p.shot).filter(Boolean).sort();
     if(all.length) S.edit.date=all[0];
@@ -658,7 +727,7 @@ function findDup(size,shot){
 $("picker").onchange=async ev=>{
   const files=[...ev.target.files]; ev.target.value="";
   if(!files.length) return;
-  if(!S.edit) await newEntry();
+  if(!(S.view==="edit" && S.edit)){ await startBatch(files); return; }
   busy(true,"處理照片…");
   let dupMsg=null, bad=0;
   for(let i=0;i<files.length;i++){
@@ -704,7 +773,7 @@ function detailHTML(){
     ages.map(a=>'<span class="age">'+a+"</span>").join(" ")+"</div>"+ph+
     '<div class="detail-text">'+(e.text?esc(e.text):'<span style="color:#7A8A94">（尚未寫文字）</span>')+"</div>"+
     '<div class="bar"><button class="btn ghost" id="d_del">刪除</button>'+
-    '<button class="btn" id="d_edit">編輯</button></div>';
+    '<button class="btn" id="d_edit">'+((e.text||"").trim()?"編輯":"補寫文字")+'</button></div>';
 }
 function bindDetail(){
   $("d_edit") && ($("d_edit").onclick=()=>openEdit(S.detailId));
@@ -758,6 +827,10 @@ function settingsHTML(){
     '<div class="row" style="margin-top:10px"><button class="btn" id="bk_share" style="flex:1">備份</button>'+
     '<button class="btn ghost" id="bk_imp" style="flex:1">從備份還原</button></div></div>'+
 
+    '<div class="sec"><h3>輸出 PDF</h3>'+
+    '<p class="hint">選日期範圍和孩子，排成可以列印或做成紙本相簿的版面。</p>'+
+    '<button class="btn" id="go_export" style="width:100%;margin-top:10px">輸出 PDF</button></div>'+
+
     '<div class="sec"><h3>孩子</h3><div id="kidlist">'+
       S.kids.map(k=>'<div class="kidrow"><span class="nm">'+esc(k.name)+'</span>'+
         '<span class="bd">'+esc(k.birth||"未填生日")+"</span>"+
@@ -774,12 +847,13 @@ function settingsHTML(){
       '<div class="kv"><span>照片佔用</span><span>'+bytes(total)+"</span></div>"+
       '<div class="kv"><span>最近刪除</span><span>'+del+" 篇</span></div>"+
       '<button class="btn ghost sm" id="go_trash" style="margin-top:8px">開啟最近刪除</button></div>'+
-    '<p class="hint" style="text-align:center;margin:18px 0">寶寶日記 v1.1　資料不上傳任何伺服器</p>';
+    '<p class="hint" style="text-align:center;margin:18px 0">寶寶日記 v1.2　資料不上傳任何伺服器</p>';
 }
 function bindSettings(){
   $("bk_share").onclick=doBackup;
   $("bk_imp").onclick=()=>$("zippicker").click();
   $("go_trash").onclick=()=>{ S.view="trash"; render(); };
+  $("go_export").onclick=()=>{ S.view="export"; render(); };
   $("k_add").onclick=()=>kidDialog(null);
   document.querySelectorAll("[data-ek]").forEach(b=>b.onclick=()=>kidDialog(b.dataset.ek));
   document.querySelectorAll("[data-fs]").forEach(b=>b.onclick=async()=>{
@@ -835,6 +909,180 @@ function bindTrash(){
     S.entries=S.entries.filter(x=>x.id!==e.id);
     render(); toast("已永久刪除");
   });
+}
+
+/* ---------------- 批次：一次多張，依拍攝日期自動分篇 ---------------- */
+async function startBatch(files){
+  if(!(S.batch && S.view==="batch")){
+    S.batch={kidIds:(S.settings.lastKidIds||[]).filter(id=>kidById(id)),items:[],dateOf:{}};
+    if(!S.batch.kidIds.length && S.kids.length===1) S.batch.kidIds=[S.kids[0].id];
+  }
+  let dupMsg=null, bad=0;
+  for(let i=0;i<files.length;i++){
+    busy(true,"處理照片 "+(i+1)+"/"+files.length+"…");
+    try{ const {photo,dup}=await processFile(files[i]); S.batch.items.push(photo); if(dup && !dupMsg) dupMsg=dup; }
+    catch(e){ bad++; }
+  }
+  busy(false);
+  if(!S.batch.items.length){ S.batch=null; toast("照片都讀不出來"); S.view="timeline"; render(); return; }
+  S.view="batch"; saveDraft(); render();
+  if(dupMsg) toast("有照片好像已經在 "+fmtDate(dupMsg.date)+" 那篇了",3600);
+  else if(bad) toast(bad+" 個檔案讀不出來，已跳過");
+}
+/* 以原始拍攝日期分組；讀不到日期的另成一組，放最前面提醒確認 */
+function batchGroups(){
+  const g=new Map();
+  for(const p of S.batch.items){
+    const key=p.shot||"unknown";
+    if(!g.has(key)) g.set(key,[]);
+    g.get(key).push(p);
+  }
+  return [...g.entries()]
+    .sort((a,b)=> a[0]==="unknown"?-1 : b[0]==="unknown"?1 : (a[0]<b[0]?1:-1))
+    .map(([key,photos])=>({key,photos,date:S.batch.dateOf[key]||(key==="unknown"?todayStr():key)}));
+}
+function batchHTML(){
+  const b=S.batch, groups=batchGroups();
+  return '<div class="field"><label>是誰（套用到這批全部）</label><div class="row" id="bpick">'+
+      S.kids.map(k=>'<button class="chip'+(b.kidIds.includes(k.id)?" on":"")+'" data-k="'+k.id+'">'+esc(k.name)+"</button>").join("")+
+    "</div></div>"+
+    '<p class="hint">依拍攝日期分成 <b>'+groups.length+"</b> 篇，共 "+b.items.length+" 張。文字存好之後再各篇補。</p>"+
+    groups.map(g=>'<div class="sec grp">'+
+      '<div class="row"><input type="date" class="inp grpdate" data-key="'+g.key+'" value="'+g.date+'" max="'+todayStr()+'" style="flex:1">'+
+      '<span class="hint" style="margin:0 0 0 8px;white-space:nowrap">'+g.photos.length+" 張</span></div>"+
+      (g.key==="unknown"?'<p class="hint warn">這些照片讀不到拍攝日期，先放今天，請確認日期。</p>':"")+
+      '<div class="editgrid g4">'+g.photos.map(p=>'<div class="ph"><img src="'+url(p.id)+'" alt="">'+
+        '<button class="x" data-bdel="'+p.id+'">×</button></div>').join("")+"</div></div>").join("")+
+    '<button class="btn ghost" id="b_more" style="width:100%;margin-top:4px">再加照片</button>'+
+    '<div class="bar"><button class="btn ghost" id="b_cancel">取消</button>'+
+    '<button class="btn" id="b_save">全部存起來（'+groups.length+" 篇）</button></div>";
+}
+function bindBatch(){
+  const b=S.batch;
+  document.querySelectorAll("#bpick .chip").forEach(c=>c.onclick=()=>{
+    const id=c.dataset.k, i=b.kidIds.indexOf(id);
+    if(i>=0) b.kidIds.splice(i,1); else b.kidIds.push(id);
+    c.classList.toggle("on"); saveDraft();
+  });
+  document.querySelectorAll(".grpdate").forEach(inp=>inp.onchange=()=>{
+    if(inp.value) b.dateOf[inp.dataset.key]=inp.value; saveDraft();
+  });
+  document.querySelectorAll("[data-bdel]").forEach(x=>x.onclick=async()=>{
+    const id=x.dataset.bdel;
+    b.items=b.items.filter(p=>p.id!==id); await dbDel("photos",id);
+    if(!b.items.length){ S.batch=null; clearDraft(); S.view="timeline"; render(); return; }
+    saveDraft(); render();
+  });
+  $("b_more").onclick=()=>$("picker").click();
+  $("b_cancel").onclick=()=>{
+    const m=modal('<h3>放棄這批照片？</h3><p class="hint">還沒存的 '+b.items.length+' 張會被丟掉，手機相簿裡的原圖不受影響。</p>'+
+      '<div class="row" style="margin-top:14px"><button class="btn danger" id="cy" style="flex:1">放棄</button>'+
+      '<button class="btn ghost" id="cn" style="flex:1">回去</button></div>');
+    m.querySelector("#cy").onclick=async()=>{
+      closeModal();
+      for(const p of b.items) await dbDel("photos",p.id);
+      S.batch=null; clearDraft(); S.view="timeline"; render();
+    };
+    m.querySelector("#cn").onclick=closeModal;
+  };
+  $("b_save").onclick=saveBatch;
+}
+async function saveBatch(){
+  const b=S.batch;
+  if(!b.kidIds.length){ toast("先選是哪個孩子"); return; }
+  const groups=batchGroups(), now=Date.now();
+  for(let i=0;i<groups.length;i++){
+    const g=groups[i];
+    const rec={id:uid(),date:g.date,dateManual:g.key==="unknown"||g.date!==g.key,text:"",
+      kidIds:b.kidIds.slice(),photos:g.photos.slice(),created:now+i,updated:now,deleted:null};
+    await dbPut("entries",rec); S.entries.push(rec);
+  }
+  S.settings.lastKidIds=b.kidIds.slice(); await saveSettings();
+  clearDraft(); S.batch=null; S.view="timeline"; render();
+  toast("已建立 "+groups.length+" 篇，文字之後再補",3200);
+}
+
+/* ---------------- 輸出 PDF（走瀏覽器列印 → 儲存為 PDF） ---------------- */
+function ymd(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+function exDefaults(){
+  const d=new Date();
+  return {from:ymd(new Date(d.getFullYear(),d.getMonth(),1)),to:todayStr(),kid:"all",perPage:true,cover:true};
+}
+function exportList(){
+  const x=S.ex;
+  return liveEntries()
+    .filter(e=>e.date>=x.from && e.date<=x.to && (x.kid==="all"||e.kidIds.includes(x.kid)))
+    .sort((a,b)=> a.date===b.date ? a.created-b.created : (a.date<b.date?-1:1));
+}
+function exportHTML(){
+  if(!S.ex) S.ex=exDefaults();
+  const x=S.ex, list=exportList();
+  const nph=list.reduce((s,e)=>s+e.photos.length,0);
+  return '<div class="sec"><h3>日期範圍</h3><div class="quick">'+
+      '<button class="btn ghost sm" data-q="m0">本月</button>'+
+      '<button class="btn ghost sm" data-q="m1">上個月</button>'+
+      '<button class="btn ghost sm" data-q="y0">今年</button>'+
+      '<button class="btn ghost sm" data-q="all">全部</button></div>'+
+      '<div class="row" style="margin-top:10px;flex-wrap:nowrap">'+
+      '<input type="date" class="inp" id="x_from" value="'+x.from+'" style="flex:1">'+
+      '<span>～</span><input type="date" class="inp" id="x_to" value="'+x.to+'" style="flex:1"></div></div>'+
+    '<div class="sec"><h3>孩子</h3><div class="row">'+
+      '<button class="chip'+(x.kid==="all"?" on":"")+'" data-xk="all">全部</button>'+
+      S.kids.map(k=>'<button class="chip'+(x.kid===k.id?" on":"")+'" data-xk="'+k.id+'">'+esc(k.name)+"</button>").join("")+
+    "</div></div>"+
+    '<div class="sec"><h3>版面</h3><div class="row">'+
+      '<button class="btn sm '+(x.perPage?"":"ghost")+'" data-pp="1">每篇一頁（做相簿）</button>'+
+      '<button class="btn sm '+(x.perPage?"ghost":"")+'" data-pp="0">連續排（省紙）</button></div>'+
+      '<label class="row" style="margin-top:12px;font-size:.92rem"><input type="checkbox" id="x_cover"'+(x.cover?" checked":"")+'> 加封面</label></div>'+
+    '<div class="sec"><div class="kv"><span>日記</span><span>'+list.length+' 篇</span></div>'+
+      '<div class="kv"><span>照片</span><span>'+nph+" 張</span></div>"+
+      (nph>150?'<p class="hint warn">照片很多，產生時手機可能會很慢或當掉，建議一次輸出一兩個月。</p>':"")+
+    "</div>"+
+    '<p class="hint">按下後會跳出列印畫面，上方的印表機選「<b>儲存為 PDF</b>」，再按下載圖示。</p>'+
+    '<div class="bar"><button class="btn" id="x_go"'+(list.length?"":" disabled")+'>產生 PDF</button></div>';
+}
+function bindExport(){
+  const x=S.ex;
+  document.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>{
+    const d=new Date(), q=b.dataset.q;
+    if(q==="m0"){ x.from=ymd(new Date(d.getFullYear(),d.getMonth(),1)); x.to=todayStr(); }
+    if(q==="m1"){ x.from=ymd(new Date(d.getFullYear(),d.getMonth()-1,1)); x.to=ymd(new Date(d.getFullYear(),d.getMonth(),0)); }
+    if(q==="y0"){ x.from=d.getFullYear()+"-01-01"; x.to=todayStr(); }
+    if(q==="all"){ const ds=liveEntries().map(e=>e.date).sort(); x.from=ds[0]||todayStr(); x.to=ds[ds.length-1]||todayStr(); }
+    render();
+  });
+  $("x_from").onchange=ev=>{ if(ev.target.value){ x.from=ev.target.value; render(); } };
+  $("x_to").onchange=ev=>{ if(ev.target.value){ x.to=ev.target.value; render(); } };
+  document.querySelectorAll("[data-xk]").forEach(b=>b.onclick=()=>{ x.kid=b.dataset.xk; render(); });
+  document.querySelectorAll("[data-pp]").forEach(b=>b.onclick=()=>{ x.perPage=b.dataset.pp==="1"; render(); });
+  $("x_cover").onchange=ev=>{ x.cover=ev.target.checked; };
+  $("x_go").onclick=makePrint;
+}
+function fullDate(s){ return s.slice(0,4)+"年"+fmtDate(s); }
+async function makePrint(){
+  const x=S.ex, list=exportList();
+  if(!list.length){ toast("這個範圍沒有日記"); return; }
+  busy(true,"排版中…");
+  await primeUrls(list.flatMap(e=>e.photos.map(p=>p.id)));
+  let h="";
+  if(x.cover){
+    const kids = x.kid==="all" ? S.kids : S.kids.filter(k=>k.id===x.kid);
+    h+='<div class="cover"><h1>寶寶日記</h1><div class="rng">'+fullDate(x.from)+" ～ "+fullDate(x.to)+"</div>"+
+       '<div class="kids">'+kids.map(k=>esc(k.name)+(k.birth?"　"+k.birth.replace(/-/g,".")+" 出生":"")).join("<br>")+"</div></div>";
+  }
+  for(const e of list){
+    const ages=e.kidIds.map(id=>{const k=kidById(id); return k? esc(k.name)+" "+ageText(k.birth,e.date):"";}).filter(Boolean).join("　·　");
+    const n=e.photos.length, col=n<=1?"c1":n<=4?"c2":"c3";
+    h+='<section class="pe'+(x.perPage?" pp":"")+'"><div class="pd">'+fullDate(e.date)+"</div>"+
+       '<div class="pa">'+ages+"</div>"+
+       (n?'<div class="pg '+col+'">'+e.photos.map(p=>'<img src="'+url(p.id)+'" alt="">').join("")+"</div>":"")+
+       ((e.text||"").trim()?'<div class="pt">'+esc(e.text)+"</div>":"")+"</section>";
+  }
+  const pr=$("print"); pr.innerHTML=h;
+  await Promise.all([...pr.querySelectorAll("img")].map(im=>
+    im.complete ? 1 : new Promise(r=>{ im.onload=im.onerror=r; setTimeout(r,8000); })));
+  busy(false);
+  window.print();
 }
 
 /* ---------------- ZIP（store 法，零依賴） ---------------- */
@@ -976,11 +1224,19 @@ $("zippicker").onchange=async ev=>{
 };
 
 /* ---------------- 導覽 ---------------- */
-$("fab").onclick=()=>newEntry();
+$("fab").onclick=()=>{
+  const m=modal('<h3>新增</h3><div class="menu">'+
+    '<button id="f_ph">選照片（可多張，依拍攝日期自動分篇）</button>'+
+    '<button id="f_tx">只寫文字</button><button id="f_c">取消</button></div>');
+  m.querySelector("#f_ph").onclick=()=>{ closeModal(); S.batch=null; $("picker").click(); };
+  m.querySelector("#f_tx").onclick=()=>{ closeModal(); newEntry(); };
+  m.querySelector("#f_c").onclick=closeModal;
+};
 $("gear").onclick=()=>{ S.view="settings"; render(); };
 $("back").onclick=()=>{
   if(S.view==="edit"){ $("e_cancel").click(); return; }
-  if(S.view==="trash"){ S.view="settings"; render(); return; }
+  if(S.view==="trash" || S.view==="export"){ S.view="settings"; render(); return; }
+  if(S.view==="batch"){ $("b_cancel").click(); return; }
   S.view="timeline"; render();
 };
 
@@ -988,7 +1244,8 @@ $("back").onclick=()=>{
 if("serviceWorker" in navigator){
   window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
 }
-window.addEventListener("beforeunload",()=>{ if(S.view==="edit") saveDraft(); });
+window.addEventListener("beforeunload",()=>{ if(S.view==="edit"||S.view==="batch") saveDraft(); });
+window.addEventListener("afterprint",()=>{ $("print").innerHTML=""; });
 boot().catch(err=>{
   $("view").innerHTML='<div class="empty-state">啟動失敗：'+esc(err.message||err)+
     "<br>請確認瀏覽器允許網站儲存資料。</div>";
