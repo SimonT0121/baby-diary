@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#00A896">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>寶寶日記</title>
+<style>
+:root{
+  --bg:#FFFDF8; --card:#FFFFFF; --pri:#00A896; --pri-d:#00806F;
+  --acc:#EF6351; --ink:#22303A; --mute:#7A8A94; --line:#E4E8E6;
+  --warn:#FFD166; --fs:16px;
+  --top:env(safe-area-inset-top,0px); --bot:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:#FFFDF8; color:#22303A;
+  font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,sans-serif;
+  font-size:var(--fs); line-height:1.6;
+  -webkit-text-size-adjust:100%;
+}
+button,input,textarea,select{font-family:inherit;font-size:1rem;color:#22303A}
+button{cursor:pointer;border:none;background:none;padding:0}
+.hide{display:none !important}
+
+/* ---------- 版面骨架 ---------- */
+#top{
+  position:sticky;top:0;z-index:30;background:#FFFDF8;
+  padding-top:var(--top);border-bottom:1px solid var(--line);
+}
+.topbar{display:flex;align-items:center;gap:10px;padding:10px 14px;min-height:52px}
+.topbar h1{font-size:1.1rem;margin:0;font-weight:700;flex:1;
+  font-family:"Noto Serif TC","Songti TC",PMingLiU,serif}
+.topbar .sub{font-size:.8rem;color:var(--mute);font-weight:400}
+.iconbtn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;font-size:1.35rem;color:var(--pri)}
+.iconbtn:active{background:#EAF7F5}
+
+#kidbar{display:flex;gap:8px;padding:0 14px 10px;overflow-x:auto;scrollbar-width:none}
+#kidbar::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;padding:7px 14px;border-radius:999px;border:1.5px solid var(--line);
+  background:#fff;font-size:.9rem;color:var(--mute);white-space:nowrap;min-height:38px}
+.chip.on{background:var(--pri);border-color:var(--pri);color:#fff;font-weight:700}
+
+main{padding:0 14px calc(96px + var(--bot))}
+
+#fab{
+  position:fixed;right:18px;bottom:calc(20px + var(--bot));z-index:40;
+  width:62px;height:62px;border-radius:50%;background:var(--pri);color:#fff;
+  font-size:2rem;line-height:1;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 6px 18px rgba(0,128,111,.38)
+}
+#fab:active{background:var(--pri-d)}
+
+/* ---------- 提醒橫幅 ---------- */
+#banner{margin:12px 0 0;background:#FFF6DA;border:1px solid var(--warn);
+  border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center}
+#banner p{margin:0;flex:1;font-size:.9rem}
+#banner button{background:var(--ink);color:#fff;border-radius:8px;padding:9px 14px;font-size:.88rem}
+
+/* ---------- 時間軸 ---------- */
+.monthhead{font-size:.85rem;color:var(--mute);font-weight:700;margin:22px 0 8px;
+  letter-spacing:.04em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:12px;margin-bottom:12px}
+.card:active{background:#FAFCFB}
+.card .meta{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.card .date{font-weight:700;font-size:.95rem}
+.card .age{font-size:.8rem;color:var(--pri-d);background:#EAF7F5;border-radius:6px;padding:2px 7px}
+.card .txt{font-size:.95rem;margin:6px 0 0;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .txt.empty{color:var(--mute);font-style:normal}
+.thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:8px}
+.thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block;background:#EEF1F0}
+.thumbs .more{position:relative}
+.thumbs .more span{position:absolute;inset:0;background:rgba(0,0,0,.45);color:#fff;
+  border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.95rem;font-weight:700}
+.empty-state{text-align:center;color:var(--mute);padding:60px 20px;font-size:.95rem}
+
+/* ---------- 編輯頁 ---------- */
+.field{margin:16px 0}
+.field label{display:block;font-size:.85rem;color:var(--mute);font-weight:700;margin-bottom:6px}
+.inp{width:100%;padding:12px;border:1.5px solid var(--line);border-radius:10px;background:#fff}
+textarea.inp{min-height:180px;resize:vertical;line-height:1.75}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{padding:12px 16px;border-radius:10px;background:var(--pri);color:#fff;font-weight:700;min-height:48px}
+.btn:active{background:var(--pri-d)}
+.btn.ghost{background:#fff;color:var(--ink);border:1.5px solid var(--line);font-weight:400}
+.btn.danger{background:#fff;color:var(--acc);border:1.5px solid var(--acc)}
+.btn.sm{padding:8px 12px;min-height:40px;font-size:.88rem}
+.hint{font-size:.82rem;color:var(--mute);margin:6px 0 0}
+.hint.warn{color:var(--acc)}
+.editgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.editgrid .ph{position:relative}
+.editgrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block;background:#EEF1F0}
+.editgrid .ph.drag{opacity:.35}
+.editgrid .x{position:absolute;top:-6px;right:-6px;width:28px;height:28px;border-radius:50%;
+  background:rgba(34,48,58,.86);color:#fff;font-size:1rem;display:flex;align-items:center;justify-content:center}
+.editgrid .cover{position:absolute;left:4px;bottom:4px;background:rgba(0,168,150,.92);color:#fff;
+  font-size:.7rem;padding:2px 6px;border-radius:5px}
+.addph{width:100%;aspect-ratio:1;border:1.5px dashed var(--line);border-radius:10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--mute);font-size:.8rem;background:#fff}
+.bar{position:sticky;bottom:0;background:#FFFDF8;border-top:1px solid var(--line);
+  padding:10px 0 calc(10px + var(--bot));display:flex;gap:8px;z-index:20}
+.bar .btn{flex:1}
+
+/* ---------- 內頁 ---------- */
+.viewer{position:relative;margin:12px 0}
+.viewer .strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:8px;scrollbar-width:none}
+.viewer .strip::-webkit-scrollbar{display:none}
+.viewer .strip img{flex:0 0 100%;scroll-snap-align:center;width:100%;
+  max-height:62vh;object-fit:contain;border-radius:12px;background:#F1F4F3}
+.dots{display:flex;gap:5px;justify-content:center;margin-top:8px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--line)}
+.dots i.on{background:var(--pri)}
+.detail-text{white-space:pre-wrap;margin:14px 0;font-size:1rem;line-height:1.8}
+
+/* ---------- 全螢幕 ---------- */
+#full{position:fixed;inset:0;background:#000;z-index:100;display:flex;flex-direction:column}
+#full .wrap{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory}
+#full img{flex:0 0 100%;scroll-snap-align:center;width:100%;height:100%;object-fit:contain}
+#full .close{position:absolute;top:calc(8px + var(--top));right:8px;color:#fff;font-size:1.6rem;
+  width:48px;height:48px;z-index:2}
+
+/* ---------- 設定 ---------- */
+.sec{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+.sec h3{margin:0 0 10px;font-size:.95rem;
+  font-family:"Noto Serif TC","Songti TC",PMingLiU,serif}
+.kidrow{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.kidrow:last-child{border-bottom:none}
+.kidrow .nm{flex:1;font-weight:700}
+.kidrow .bd{font-size:.82rem;color:var(--mute)}
+.kv{display:flex;justify-content:space-between;font-size:.9rem;padding:5px 0}
+.kv span:last-child{color:var(--mute)}
+
+/* ---------- 對話框 ---------- */
+#modal{position:fixed;inset:0;background:rgba(34,48,58,.5);z-index:90;
+  display:flex;align-items:flex-end;justify-content:center}
+#modal .box{background:#fff;border-radius:16px 16px 0 0;width:100%;max-width:520px;
+  padding:18px 16px calc(18px + var(--bot));max-height:88vh;overflow:auto}
+#modal .box h3{margin:0 0 12px;font-size:1.05rem}
+.menu button{display:block;width:100%;text-align:left;padding:15px 6px;font-size:1rem;
+  border-bottom:1px solid var(--line)}
+.menu button:last-child{border-bottom:none}
+.menu button.del{color:var(--acc)}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(92px + var(--bot));
+  background:rgba(34,48,58,.94);color:#fff;padding:11px 18px;border-radius:10px;font-size:.9rem;
+  z-index:120;max-width:88%;text-align:center}
+#busy{position:fixed;inset:0;background:rgba(255,253,248,.82);z-index:110;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-size:.95rem}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--pri);
+  border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div id="top">
+  <div class="topbar">
+    <button class="iconbtn hide" id="back">‹</button>
+    <h1 id="title">寶寶日記</h1>
+    <button class="iconbtn" id="gear">⚙</button>
+  </div>
+  <div id="kidbar"></div>
+</div>
+
+<main id="view"></main>
+<button id="fab">＋</button>
+
+<input type="file" id="picker" accept="image/*" multiple class="hide">
+<input type="file" id="zippicker" accept=".zip" class="hide">
+
+<script>
+"use strict";
+/* =========================================================================
+   寶寶日記 v1.0  (2026-09-21)
+   單檔 PWA：資料全部存在手機瀏覽器 IndexedDB，不經任何伺服器。
+   正式保存以匯出的 zip 備份檔為準。
+   ========================================================================= */
+
+/* ---------------- IndexedDB ---------------- */
+const DB_NAME="babydiary", DB_VER=1;
+let _db=null;
+function db(){
+  if(_db) return Promise.resolve(_db);
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains("entries")) d.createObjectStore("entries",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("photos"))  d.createObjectStore("photos",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("kids"))    d.createObjectStore("kids",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("meta"))    d.createObjectStore("meta",{keyPath:"k"});
+      if(!d.objectStoreNames.contains("inbox"))   d.createObjectStore("inbox",{keyPath:"id"});
+    };
+    r.onsuccess=()=>{_db=r.result;res(_db);};
+    r.onerror=()=>rej(r.error);
+  });
+}
+function idb(store,mode,fn){
+  return db().then(d=>new Promise((res,rej)=>{
+    const t=d.transaction(store,mode), s=t.objectStore(store);
+    let out; try{ out=fn(s); }catch(e){ rej(e); return; }
+    t.oncomplete=()=>res(out && out.result!==undefined ? out.result : out);
+    t.onerror=()=>rej(t.error);
+  }));
+}
+const dbAll =s=>idb(s,"readonly",st=>st.getAll());
+const dbGet =(s,k)=>idb(s,"readonly",st=>st.get(k));
+const dbPut =(s,v)=>idb(s,"readwrite",st=>st.put(v));
+const dbDel =(s,k)=>idb(s,"readwrite",st=>st.delete(k));
+
+/* ---------------- 共用小工具 ---------------- */
+const $=id=>document.getElementById(id);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad=n=>String(n).padStart(2,"0");
+const todayStr=()=>{const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());};
+function toast(msg,ms){
+  const old=$("toast"); if(old) old.remove();
+  const el=document.createElement("div"); el.id="toast"; el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), ms||2400);
+}
+function busy(on,txt){
+  let el=$("busy");
+  if(!on){ if(el) el.remove(); return; }
+  if(!el){ el=document.createElement("div"); el.id="busy";
+    el.innerHTML='<div class="spin"></div><div id="busytxt"></div>'; document.body.appendChild(el); }
+  $("busytxt").textContent=txt||"處理中…";
+}
+function modal(html){
+  closeModal();
+  const m=document.createElement("div"); m.id="modal";
+  m.innerHTML='<div class="box">'+html+'</div>';
+  m.addEventListener("click",e=>{ if(e.target===m) closeModal(); });
+  document.body.appendChild(m); return m;
+}
+function closeModal(){ const m=$("modal"); if(m) m.remove(); }
+
+/* 月齡：未滿 1 個月→天；未滿 2 歲→X個月Y天；其後→X歲Y個月 */
+function ageText(birth,dateStr){
+  if(!birth) return "";
+  const b=new Date(birth+"T00:00:00"), d=new Date(dateStr+"T00:00:00");
+  if(isNaN(b)||isNaN(d)) return "";
+  if(d<b) return "出生前";
+  let months=(d.getFullYear()-b.getFullYear())*12+(d.getMonth()-b.getMonth());
+  let anchor=new Date(b); anchor.setMonth(b.getMonth()+months);
+  if(anchor>d){ months--; anchor=new Date(b); anchor.setMonth(b.getMonth()+months); }
+  const days=Math.round((d-anchor)/86400000);
+  if(months<1) return days+" 天";
+  if(months<24) return months+" 個月"+(days>0?" "+days+" 天":"");
+  return Math.floor(months/12)+" 歲"+(months%12>0?" "+(months%12)+" 個月":"");
+}
+function fmtDate(s){
+  const d=new Date(s+"T00:00:00"); if(isNaN(d)) return s;
+  const w="日一二三四五六"[d.getDay()];
+  return (d.getMonth()+1)+"月"+d.getDate()+"日（"+w+"）";
+}
+function daysBetween(a,b){ return Math.round((new Date(b)-new Date(a))/86400000); }
+function bytes(n){ return n<1048576 ? (n/1024).toFixed(0)+" KB" : (n/1048576).toFixed(1)+" MB"; }
+
+/* ---------------- EXIF 拍攝日期 ---------------- */
+/* 只解析 JPEG APP1 / TIFF IFD0 → ExifIFD → DateTimeOriginal(0x9003)。
+   讀不到就回 null，交給使用者手動填。 */
+async function exifDate(file){
+  try{
+    const buf=await file.slice(0,256*1024).arrayBuffer();
+    const v=new DataView(buf);
+    if(v.byteLength<4 || v.getUint16(0)!==0xFFD8) return null;   // 非 JPEG
+    let off=2, app1=-1, app1len=0;
+    while(off+4<=v.byteLength){
+      if(v.getUint8(off)!==0xFF) break;
+      const mk=v.getUint8(off+1), len=v.getUint16(off+2);
+      if(mk===0xE1){ app1=off+4; app1len=len-2; break; }
+      if(mk===0xDA) break;
+      off+=2+len;
+    }
+    if(app1<0) return null;
+    if(v.getUint32(app1)!==0x45786966) return null;              // "Exif"
+    const T=app1+6;                                              // TIFF header
+    const le=v.getUint16(T)===0x4949;
+    const u16=p=>v.getUint16(p,le), u32=p=>v.getUint32(p,le);
+    if(u16(T+2)!==42) return null;
+    const readIFD=(base,want)=>{
+      if(base+2>v.byteLength) return null;
+      const n=u16(base);
+      for(let i=0;i<n;i++){
+        const e=base+2+i*12;
+        if(e+12>v.byteLength) break;
+        if(u16(e)===want) return {type:u16(e+2),count:u32(e+4),val:u32(e+8),ptr:e+8};
+      }
+      return null;
+    };
+    const ifd0=T+u32(T+4);
+    const exifPtr=readIFD(ifd0,0x8769);
+    let tag=null;
+    if(exifPtr) tag=readIFD(T+exifPtr.val,0x9003) || readIFD(T+exifPtr.val,0x9004);
+    if(!tag) tag=readIFD(ifd0,0x0132);                           // DateTime 後備
+    if(!tag || tag.count<19) return null;
+    const p=tag.count>4 ? T+tag.val : tag.ptr;
+    let s=""; for(let i=0;i<19 && p+i<v.byteLength;i++) s+=String.fromCharCode(v.getUint8(p+i));
+    const m=s.match(/^(\d{4})[:\-](\d{2})[:\-](\d{2})/);
+    if(!m) return null;
+    const y=+m[1];
+    if(y<1990 || y>new Date().getFullYear()+1) return null;      // 明顯不合理就丟掉
+    return m[1]+"-"+m[2]+"-"+m[3];
+  }catch(e){ return null; }
+}
+
+/* ---------------- 壓縮 ---------------- */
+const MAXPX=1400, QUALITY=0.75;
+async function compress(file){
+  let bmp;
+  try{ bmp=await createImageBitmap(file); }
+  catch(e){ throw new Error("這個檔案不是可讀的照片"); }
+  let {width:w,height:h}=bmp;
+  const sc=Math.min(1, MAXPX/Math.max(w,h));
+  w=Math.round(w*sc); h=Math.round(h*sc);
+  const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+  cv.getContext("2d").drawImage(bmp,0,0,w,h);
+  bmp.close && bmp.close();
+  const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",QUALITY));
+  return {blob,w,h};
+}
+
+/* ---------------- 狀態 ---------------- */
+const S={
+  kids:[], entries:[], settings:{fontScale:1,lastBackup:null,lastKidIds:[]},
+  filter:"all", view:"timeline", edit:null, detailId:null, urls:new Map()
+};
+function url(pid){
+  if(S.urls.has(pid)) return S.urls.get(pid);
+  return "";
+}
+async function primeUrls(ids){
+  for(const id of ids){
+    if(S.urls.has(id)) continue;
+    const rec=await dbGet("photos",id);
+    if(rec && rec.blob) S.urls.set(id,URL.createObjectURL(rec.blob));
+  }
+}
+function liveEntries(){ return S.entries.filter(e=>!e.deleted); }
+function kidById(id){ return S.kids.find(k=>k.id===id); }
+
+/* ---------------- 載入 ---------------- */
+async function boot(){
+  S.kids=(await dbAll("kids")).sort((a,b)=>(a.order||0)-(b.order||0));
+  S.entries=await dbAll("entries");
+  const m=await dbGet("meta","settings");
+  if(m && m.v) S.settings=Object.assign(S.settings,m.v);
+  document.documentElement.style.setProperty("--fs",(16*S.settings.fontScale)+"px");
+  await purgeTrash();
+  if(!S.kids.length){ S.view="setup"; render(); return; }
+  await handleShare();
+  render();
+  checkDraft();
+}
+async function saveSettings(){ await dbPut("meta",{k:"settings",v:S.settings}); }
+
+/* 超過 30 天的已刪除項目真正清掉 */
+async function purgeTrash(){
+  const now=Date.now(), keep=[];
+  for(const e of S.entries){
+    if(e.deleted && now-e.deleted>30*86400000){
+      for(const p of e.photos) await dbDel("photos",p.id);
+      await dbDel("entries",e.id);
+    } else keep.push(e);
+  }
+  S.entries=keep;
+}
+
+/* ---------------- 從 Google 相簿分享進來 ---------------- */
+async function handleShare(){
+  const q=new URLSearchParams(location.search);
+  if(!q.has("share")) return;
+  history.replaceState(null,"",location.pathname);
+  const items=await dbAll("inbox");
+  if(!items.length) return;
+  await dbPut("meta",{k:"noop",v:1});
+  await newEntry();
+  busy(true,"處理照片…");
+  for(const it of items){
+    try{ await addPhotoFile(new File([it.blob],it.name||"shared.jpg",{type:it.blob.type||"image/jpeg"})); }
+    catch(e){ /* 跳過壞檔 */ }
+    await dbDel("inbox",it.id);
+  }
+  busy(false);
+}
+
+/* ---------------- 草稿 ---------------- */
+const DRAFT="babydiary_draft";
+function saveDraft(){
+  if(!S.edit) return;
+  try{ localStorage.setItem(DRAFT,JSON.stringify({t:Date.now(),e:S.edit})); }catch(e){}
+}
+function clearDraft(){ try{ localStorage.removeItem(DRAFT); }catch(e){} }
+function checkDraft(){
+  if(S.view!=="timeline") return;
+  let d; try{ d=JSON.parse(localStorage.getItem(DRAFT)||"null"); }catch(e){ return; }
+  if(!d || !d.e) return;
+  const hasStuff=(d.e.text||"").trim() || (d.e.photos||[]).length;
+  if(!hasStuff){ clearDraft(); return; }
+  const m=modal('<h3>上次有一篇沒寫完</h3><p class="hint">'+fmtDate(d.e.date)+
+    '，'+(d.e.photos||[]).length+' 張照片。要繼續嗎？</p>'+
+    '<div class="row" style="margin-top:14px"><button class="btn" id="dyes" style="flex:1">繼續編輯</button>'+
+    '<button class="btn ghost" id="dno" style="flex:1">丟掉</button></div>');
+  m.querySelector("#dyes").onclick=async()=>{ closeModal(); S.edit=d.e; S.view="edit";
+    await primeUrls(S.edit.photos.map(p=>p.id)); render(); };
+  m.querySelector("#dno").onclick=()=>{ clearDraft(); closeModal(); };
+}
+
+/* ---------------- 渲染 ---------------- */
+function render(){
+  const v=$("view");
+  $("back").classList.toggle("hide", S.view==="timeline"||S.view==="setup");
+  $("gear").classList.toggle("hide", S.view!=="timeline");
+  $("fab").classList.toggle("hide", S.view!=="timeline");
+  $("kidbar").classList.toggle("hide", S.view!=="timeline" || S.kids.length<2);
+  if(S.view==="timeline"){ $("title").innerHTML="寶寶日記"+todayAges(); renderKidbar(); v.innerHTML=timelineHTML(); bindTimeline(); }
+  else if(S.view==="setup"){ $("title").textContent="開始使用"; v.innerHTML=setupHTML(); bindSetup(); }
+  else if(S.view==="edit"){ $("title").textContent=S.edit.id?"編輯日記":"新增日記"; v.innerHTML=editHTML(); bindEdit(); }
+  else if(S.view==="detail"){ $("title").textContent="日記"; v.innerHTML=detailHTML(); bindDetail(); }
+  else if(S.view==="settings"){ $("title").textContent="設定"; v.innerHTML=settingsHTML(); bindSettings(); }
+  else if(S.view==="trash"){ $("title").textContent="最近刪除"; v.innerHTML=trashHTML(); bindTrash(); }
+  window.scrollTo(0,0);
+}
+function todayAges(){
+  const t=todayStr();
+  const parts=S.kids.filter(k=>k.birth).map(k=>esc(k.name)+" "+ageText(k.birth,t));
+  return parts.length ? '<div class="sub">'+parts.join("　·　")+"</div>" : "";
+}
+function renderKidbar(){
+  const bar=$("kidbar");
+  bar.innerHTML='<button class="chip'+(S.filter==="all"?" on":"")+'" data-k="all">全部</button>'+
+    S.kids.map(k=>'<button class="chip'+(S.filter===k.id?" on":"")+'" data-k="'+k.id+'">'+esc(k.name)+"</button>").join("");
+  bar.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{ S.filter=b.dataset.k; render(); });
+}
+
+/* ---- 時間軸 ---- */
+function timelineHTML(){
+  let list=liveEntries();
+  if(S.filter!=="all") list=list.filter(e=>e.kidIds.includes(S.filter));
+  list.sort((a,b)=> a.date===b.date ? b.created-a.created : (a.date<b.date?1:-1));
+  primeUrls(list.flatMap(e=>e.photos.slice(0,4).map(p=>p.id))).then(()=>{
+    document.querySelectorAll("img[data-pid]").forEach(im=>{
+      const u=url(im.dataset.pid); if(u) im.src=u;
+    });
+  });
+  let html=bannerHTML();
+  if(!list.length) return html+'<div class="empty-state">還沒有日記。<br>按右下角的 ＋，或在 Google 相簿選照片分享到「寶寶日記」。</div>';
+  let cur="";
+  for(const e of list){
+    const ym=e.date.slice(0,7);
+    if(ym!==cur){ cur=ym; html+='<div class="monthhead">'+(+ym.slice(5,7))+" 月 "+ym.slice(0,4)+"</div>"; }
+    html+=cardHTML(e);
+  }
+  return html;
+}
+function bannerHTML(){
+  const lb=S.settings.lastBackup;
+  const stale = !lb || daysBetween(lb,Date.now())>=14;
+  if(!stale || !liveEntries().length) return "";
+  const t = lb ? daysBetween(lb,Date.now())+" 天沒備份了" : "還沒備份過";
+  return '<div id="banner"><p>'+t+'。日記只存在這支手機裡，換手機或清除瀏覽器資料就會消失。</p>'+
+         '<button id="bkbtn">去備份</button></div>';
+}
+function cardHTML(e){
+  const ages=e.kidIds.map(id=>{const k=kidById(id); return k? esc(k.name)+" "+ageText(k.birth,e.date):"";}).filter(Boolean);
+  const ph=e.photos.slice(0,4), extra=e.photos.length-4;
+  let thumbs="";
+  if(ph.length){
+    thumbs='<div class="thumbs">'+ph.map((p,i)=>{
+      const last = i===3 && extra>0;
+      const img='<img data-pid="'+p.id+'" alt="">';
+      return last ? '<div class="more">'+img+"<span>+"+extra+"</span></div>" : img;
+    }).join("")+"</div>";
+  }
+  const txt=(e.text||"").trim();
+  return '<div class="card" data-id="'+e.id+'">'+
+    '<div class="meta"><span class="date">'+fmtDate(e.date)+"</span>"+
+    ages.map(a=>'<span class="age">'+a+"</span>").join("")+"</div>"+
+    thumbs+
+    '<p class="txt'+(txt?"":" empty")+'">'+(txt?esc(txt):"（尚未寫文字）")+"</p></div>";
+}
+function bindTimeline(){
+  const bk=$("bkbtn"); if(bk) bk.onclick=()=>{ S.view="settings"; render(); };
+  document.querySelectorAll(".card").forEach(c=>{
+    let timer=null, moved=false;
+    const open=()=>{ S.detailId=c.dataset.id; S.view="detail"; render(); };
+    c.addEventListener("click",()=>{ if(!moved) open(); });
+    c.addEventListener("touchstart",()=>{ moved=false;
+      timer=setTimeout(()=>{ moved=true; quickMenu(c.dataset.id); },520); },{passive:true});
+    c.addEventListener("touchmove",()=>{ clearTimeout(timer); },{passive:true});
+    c.addEventListener("touchend",()=>clearTimeout(timer));
+    c.addEventListener("contextmenu",ev=>{ ev.preventDefault(); quickMenu(c.dataset.id); });
+  });
+}
+function quickMenu(id){
+  const m=modal('<h3>這篇日記</h3><div class="menu">'+
+    '<button id="qe">編輯</button><button id="qd" class="del">刪除</button>'+
+    '<button id="qc">取消</button></div>');
+  m.querySelector("#qe").onclick=()=>{ closeModal(); openEdit(id); };
+  m.querySelector("#qd").onclick=()=>{ closeModal(); askDelete(id); };
+  m.querySelector("#qc").onclick=closeModal;
+}
+
+/* ---- 首次設定 ---- */
+function setupHTML(){
+  return '<div class="sec"><h3>先登記孩子</h3>'+
+    '<p class="hint">名字和生日用來自動算出每篇日記當時的月齡。之後在設定裡隨時可以新增或修改。</p>'+
+    '<div class="field"><label>名字</label><input class="inp" id="s_name" placeholder="例如：糕糕"></div>'+
+    '<div class="field"><label>生日</label><input class="inp" type="date" id="s_birth" max="'+todayStr()+'"></div>'+
+    '<button class="btn" id="s_add" style="width:100%">加入</button></div>'+
+    '<div class="sec" id="s_list"><h3>已登記</h3><p class="hint">目前還沒有。</p></div>'+
+    '<button class="btn" id="s_done" style="width:100%">開始使用</button>';
+}
+function bindSetup(){
+  const refresh=()=>{
+    const el=$("s_list");
+    el.innerHTML="<h3>已登記</h3>"+(S.kids.length
+      ? S.kids.map(k=>'<div class="kidrow"><span class="nm">'+esc(k.name)+'</span><span class="bd">'+esc(k.birth||"未填生日")+"</span></div>").join("")
+      : '<p class="hint">目前還沒有。</p>');
+  };
+  $("s_add").onclick=async()=>{
+    const n=$("s_name").value.trim(), b=$("s_birth").value;
+    if(!n){ toast("請填名字"); return; }
+    const kid={id:uid(),name:n,birth:b||"",order:S.kids.length};
+    S.kids.push(kid); await dbPut("kids",kid);
+    $("s_name").value=""; $("s_birth").value=""; refresh();
+  };
+  $("s_done").onclick=async()=>{
+    if(!S.kids.length){ toast("至少登記一個孩子"); return; }
+    if(navigator.storage && navigator.storage.persist){ try{ await navigator.storage.persist(); }catch(e){} }
+    S.view="timeline"; render();
+  };
+  refresh();
+}
+
+/* ---- 編輯 ---- */
+async function newEntry(){
+  S.edit={id:null,date:todayStr(),dateManual:false,text:"",
+    kidIds:(S.settings.lastKidIds||[]).filter(id=>kidById(id)),photos:[],created:Date.now()};
+  if(!S.edit.kidIds.length && S.kids.length===1) S.edit.kidIds=[S.kids[0].id];
+  S.view="edit"; render();
+}
+async function openEdit(id){
+  const e=S.entries.find(x=>x.id===id); if(!e) return;
+  S.edit=JSON.parse(JSON.stringify(e));
+  await primeUrls(S.edit.photos.map(p=>p.id));
+  S.view="edit"; render();
+}
+function editHTML(){
+  const e=S.edit;
+  const shots=e.photos.map(p=>p.shot).filter(Boolean).sort();
+  let span="";
+  if(shots.length>1 && shots[0]!==shots[shots.length-1]){
+    span='<p class="hint warn">這篇的照片跨了 '+(daysBetween(shots[0],shots[shots.length-1])+1)+
+      ' 天（'+shots[0]+" ～ "+shots[shots.length-1]+'）。日期用最早那張，要拆成不同篇的話自己拆。</p>';
+  }
+  return '<div class="field"><label>是誰</label><div class="row" id="kpick">'+
+      S.kids.map(k=>'<button class="chip'+(e.kidIds.includes(k.id)?" on":"")+'" data-k="'+k.id+'">'+esc(k.name)+"</button>").join("")+
+    '</div></div>'+
+    '<div class="field"><label>照片</label><div class="editgrid" id="grid">'+
+      e.photos.map((p,i)=>'<div class="ph" draggable="true" data-i="'+i+'">'+
+        '<img data-pid="'+p.id+'" src="'+url(p.id)+'" alt="">'+
+        (i===0?'<span class="cover">封面</span>':"")+
+        '<button class="x" data-del="'+i+'">×</button></div>').join("")+
+      '<button class="addph" id="addph">＋<span>加照片</span></button></div>'+
+      '<p class="hint">長按拖曳可調順序，第一張是封面。</p></div>'+
+    '<div class="field"><label>日期'+(e.dateManual?'（手動）':"")+'</label>'+
+      '<input class="inp" type="date" id="e_date" value="'+e.date+'" max="'+todayStr()+'">'+
+      '<div class="row" style="margin-top:8px">'+
+        '<button class="btn ghost sm" data-quick="0">今天</button>'+
+        '<button class="btn ghost sm" data-quick="1">昨天</button></div>'+span+'</div>'+
+    '<div class="field"><label>寫點什麼（可以先空著）</label>'+
+      '<textarea class="inp" id="e_text" placeholder="今天發生了…">'+esc(e.text)+"</textarea></div>"+
+    '<div class="bar"><button class="btn ghost" id="e_cancel">取消</button>'+
+      '<button class="btn" id="e_save">儲存</button></div>';
+}
+function bindEdit(){
+  const e=S.edit;
+  document.querySelectorAll("#kpick .chip").forEach(b=>b.onclick=()=>{
+    const id=b.dataset.k, i=e.kidIds.indexOf(id);
+    if(i>=0) e.kidIds.splice(i,1); else e.kidIds.push(id);
+    b.classList.toggle("on"); saveDraft();
+  });
+  $("addph").onclick=()=>$("picker").click();
+  document.querySelectorAll("[data-del]").forEach(b=>b.onclick=ev=>{
+    ev.stopPropagation();
+    e.photos.splice(+b.dataset.del,1); saveDraft(); render();
+  });
+  $("e_date").onchange=ev=>{ e.date=ev.target.value; e.dateManual=true; saveDraft(); render(); };
+  document.querySelectorAll("[data-quick]").forEach(b=>b.onclick=()=>{
+    const d=new Date(); d.setDate(d.getDate()-(+b.dataset.quick));
+    e.date=d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+    e.dateManual=true; saveDraft(); render();
+  });
+  const ta=$("e_text");
+  let t=null;
+  ta.oninput=()=>{ e.text=ta.value; clearTimeout(t); t=setTimeout(saveDraft,1200); };
+  $("e_cancel").onclick=()=>{
+    if((e.text||"").trim() || e.photos.length){
+      const m=modal('<h3>要放棄這篇嗎？</h3><p class="hint">已經加入的照片會被丟掉。</p>'+
+        '<div class="row" style="margin-top:14px"><button class="btn danger" id="cy" style="flex:1">放棄</button>'+
+        '<button class="btn ghost" id="cn" style="flex:1">繼續寫</button></div>');
+      m.querySelector("#cy").onclick=()=>{ closeModal(); clearDraft(); S.edit=null; S.view="timeline"; render(); };
+      m.querySelector("#cn").onclick=closeModal;
+    } else { clearDraft(); S.edit=null; S.view="timeline"; render(); }
+  };
+  $("e_save").onclick=saveEntry;
+  dragSort();
+}
+function dragSort(){
+  const grid=$("grid"); if(!grid) return;
+  let from=null;
+  grid.querySelectorAll(".ph").forEach(el=>{
+    el.addEventListener("dragstart",ev=>{ from=+el.dataset.i; el.classList.add("drag");
+      ev.dataTransfer.effectAllowed="move"; ev.dataTransfer.setData("text/plain",""); });
+    el.addEventListener("dragend",()=>el.classList.remove("drag"));
+    el.addEventListener("dragover",ev=>ev.preventDefault());
+    el.addEventListener("drop",ev=>{
+      ev.preventDefault();
+      const to=+el.dataset.i;
+      if(from===null||from===to) return;
+      const arr=S.edit.photos, [m]=arr.splice(from,1); arr.splice(to,0,m);
+      from=null; saveDraft(); render();
+    });
+  });
+}
+async function addPhotoFile(file){
+  const shot=await exifDate(file);
+  const dup=findDup(file.size,shot);
+  const {blob,w,h}=await compress(file);
+  const id=uid();
+  await dbPut("photos",{id,blob});
+  S.urls.set(id,URL.createObjectURL(blob));
+  S.edit.photos.push({id,w,h,size:blob.size,shot:shot||null,orig:file.size});
+  if(!S.edit.dateManual){
+    const all=S.edit.photos.map(p=>p.shot).filter(Boolean).sort();
+    if(all.length) S.edit.date=all[0];
+  }
+  saveDraft();
+  return dup;
+}
+function findDup(size,shot){
+  if(!shot) return null;
+  for(const e of liveEntries()){
+    for(const p of e.photos){
+      if(p.shot===shot && p.orig && Math.abs(p.orig-size)<1024) return e;
+    }
+  }
+  return null;
+}
+$("picker").onchange=async ev=>{
+  const files=[...ev.target.files]; ev.target.value="";
+  if(!files.length) return;
+  if(!S.edit) await newEntry();
+  busy(true,"處理照片…");
+  let dupMsg=null, bad=0;
+  for(let i=0;i<files.length;i++){
+    busy(true,"處理照片 "+(i+1)+"/"+files.length+"…");
+    try{ const d=await addPhotoFile(files[i]); if(d && !dupMsg) dupMsg=d; }
+    catch(err){ bad++; }
+  }
+  busy(false); render();
+  if(dupMsg) toast("這張好像已經在 "+fmtDate(dupMsg.date)+" 那篇了",3600);
+  else if(bad) toast(bad+" 個檔案讀不出來，已跳過");
+};
+async function saveEntry(){
+  const e=S.edit;
+  if(!e.kidIds.length){ toast("先選是哪個孩子"); return; }
+  if(!e.photos.length && !(e.text||"").trim()){ toast("至少要有一張照片或一段文字"); return; }
+  e.text=$("e_text").value;
+  const rec={
+    id:e.id||uid(), date:e.date, dateManual:!!e.dateManual, text:e.text,
+    kidIds:e.kidIds.slice(), photos:e.photos.slice(),
+    created:e.created||Date.now(), updated:Date.now(), deleted:null
+  };
+  await dbPut("entries",rec);
+  const i=S.entries.findIndex(x=>x.id===rec.id);
+  if(i>=0) S.entries[i]=rec; else S.entries.push(rec);
+  S.settings.lastKidIds=rec.kidIds.slice(); await saveSettings();
+  clearDraft(); S.edit=null; S.view="timeline"; render(); toast("已儲存");
+}
+
+/* ---- 內頁 ---- */
+function detailHTML(){
+  const e=S.entries.find(x=>x.id===S.detailId);
+  if(!e) return '<div class="empty-state">找不到這篇。</div>';
+  primeUrls(e.photos.map(p=>p.id)).then(()=>{
+    document.querySelectorAll("#strip img").forEach(im=>{ const u=url(im.dataset.pid); if(u) im.src=u; });
+  });
+  const ages=e.kidIds.map(id=>{const k=kidById(id); return k? esc(k.name)+" "+ageText(k.birth,e.date):"";}).filter(Boolean);
+  const ph=e.photos.length
+    ? '<div class="viewer"><div class="strip" id="strip">'+
+      e.photos.map((p,i)=>'<img data-pid="'+p.id+'" data-i="'+i+'" alt="">').join("")+
+      '</div><div class="dots" id="dots">'+e.photos.map((p,i)=>'<i class="'+(i?"":"on")+'"></i>').join("")+"</div></div>"
+    : "";
+  return '<div class="meta" style="margin-top:14px"><span class="date">'+fmtDate(e.date)+"</span> "+
+    ages.map(a=>'<span class="age">'+a+"</span>").join(" ")+"</div>"+ph+
+    '<div class="detail-text">'+(e.text?esc(e.text):'<span style="color:#7A8A94">（尚未寫文字）</span>')+"</div>"+
+    '<div class="bar"><button class="btn ghost" id="d_del">刪除</button>'+
+    '<button class="btn" id="d_edit">編輯</button></div>';
+}
+function bindDetail(){
+  $("d_edit") && ($("d_edit").onclick=()=>openEdit(S.detailId));
+  $("d_del") && ($("d_del").onclick=()=>askDelete(S.detailId));
+  const strip=$("strip");
+  if(strip){
+    strip.onscroll=()=>{
+      const i=Math.round(strip.scrollLeft/strip.clientWidth);
+      document.querySelectorAll("#dots i").forEach((d,j)=>d.classList.toggle("on",i===j));
+    };
+    strip.querySelectorAll("img").forEach(im=>im.onclick=()=>fullscreen(+im.dataset.i));
+  }
+}
+function fullscreen(start){
+  const e=S.entries.find(x=>x.id===S.detailId);
+  const el=document.createElement("div"); el.id="full";
+  el.innerHTML='<button class="close">×</button><div class="wrap">'+
+    e.photos.map(p=>'<img src="'+url(p.id)+'" alt="">').join("")+"</div>";
+  document.body.appendChild(el);
+  const wrap=el.querySelector(".wrap");
+  wrap.scrollLeft=start*wrap.clientWidth;
+  el.querySelector(".close").onclick=()=>el.remove();
+  let y0=null;
+  el.addEventListener("touchstart",ev=>{ y0=ev.touches[0].clientY; },{passive:true});
+  el.addEventListener("touchend",ev=>{
+    if(y0!==null && ev.changedTouches[0].clientY-y0>110) el.remove();
+    y0=null;
+  });
+}
+function askDelete(id){
+  const m=modal('<h3>刪除這篇？</h3><p class="hint">會先放進「最近刪除」，30 天內都能還原。</p>'+
+    '<div class="row" style="margin-top:14px"><button class="btn danger" id="dy" style="flex:1">刪除</button>'+
+    '<button class="btn ghost" id="dn" style="flex:1">取消</button></div>');
+  m.querySelector("#dy").onclick=async()=>{
+    closeModal();
+    const e=S.entries.find(x=>x.id===id); if(!e) return;
+    e.deleted=Date.now(); await dbPut("entries",e);
+    S.view="timeline"; render(); toast("已移到最近刪除");
+  };
+  m.querySelector("#dn").onclick=closeModal;
+}
+
+/* ---- 設定 ---- */
+function settingsHTML(){
+  const live=liveEntries().length, del=S.entries.filter(e=>e.deleted).length;
+  const total=S.entries.reduce((s,e)=>s+e.photos.reduce((t,p)=>t+(p.size||0),0),0);
+  const lb=S.settings.lastBackup;
+  return '<div class="sec"><h3>備份（最重要）</h3>'+
+    '<p class="hint">日記只存在這支手機的瀏覽器裡。換手機、手機遺失、清除瀏覽器資料，就會全部消失。備份會把照片和文字打包成一個 zip，選「雲端硬碟」就能存進 Google Drive。</p>'+
+    '<div class="kv"><span>上次備份</span><span>'+(lb?fmtDate(new Date(lb).toISOString().slice(0,10))+"（"+daysBetween(lb,Date.now())+" 天前）":"還沒備份過")+"</span></div>"+
+    '<div class="row" style="margin-top:10px"><button class="btn" id="bk_share" style="flex:1">備份</button>'+
+    '<button class="btn ghost" id="bk_imp" style="flex:1">從備份還原</button></div></div>'+
+
+    '<div class="sec"><h3>孩子</h3><div id="kidlist">'+
+      S.kids.map(k=>'<div class="kidrow"><span class="nm">'+esc(k.name)+'</span>'+
+        '<span class="bd">'+esc(k.birth||"未填生日")+"</span>"+
+        '<button class="btn ghost sm" data-ek="'+k.id+'">改</button></div>').join("")+
+    '</div><button class="btn ghost sm" id="k_add" style="margin-top:10px">新增孩子</button></div>'+
+
+    '<div class="sec"><h3>字級</h3><div class="row">'+
+      [["小",0.94],["標準",1],["大",1.12],["特大",1.26]].map(([n,v])=>
+        '<button class="btn '+(Math.abs(S.settings.fontScale-v)<0.01?"":"ghost")+' sm" data-fs="'+v+'">'+n+"</button>").join("")+
+    "</div></div>"+
+
+    '<div class="sec"><h3>資料</h3>'+
+      '<div class="kv"><span>日記篇數</span><span>'+live+" 篇</span></div>"+
+      '<div class="kv"><span>照片佔用</span><span>'+bytes(total)+"</span></div>"+
+      '<div class="kv"><span>最近刪除</span><span>'+del+" 篇</span></div>"+
+      '<button class="btn ghost sm" id="go_trash" style="margin-top:8px">開啟最近刪除</button></div>'+
+    '<p class="hint" style="text-align:center;margin:18px 0">寶寶日記 v1.0　資料不上傳任何伺服器</p>';
+}
+function bindSettings(){
+  $("bk_share").onclick=doBackup;
+  $("bk_imp").onclick=()=>$("zippicker").click();
+  $("go_trash").onclick=()=>{ S.view="trash"; render(); };
+  $("k_add").onclick=()=>kidDialog(null);
+  document.querySelectorAll("[data-ek]").forEach(b=>b.onclick=()=>kidDialog(b.dataset.ek));
+  document.querySelectorAll("[data-fs]").forEach(b=>b.onclick=async()=>{
+    S.settings.fontScale=+b.dataset.fs;
+    document.documentElement.style.setProperty("--fs",(16*S.settings.fontScale)+"px");
+    await saveSettings(); render();
+  });
+}
+function kidDialog(id){
+  const k=id?kidById(id):null;
+  const m=modal("<h3>"+(k?"修改":"新增")+'孩子</h3>'+
+    '<div class="field"><label>名字</label><input class="inp" id="k_n" value="'+esc(k?k.name:"")+'"></div>'+
+    '<div class="field"><label>生日</label><input class="inp" type="date" id="k_b" value="'+esc(k?k.birth:"")+'" max="'+todayStr()+'"></div>'+
+    '<div class="row"><button class="btn" id="k_ok" style="flex:1">儲存</button>'+
+    (k?'<button class="btn danger" id="k_rm">移除</button>':"")+"</div>");
+  m.querySelector("#k_ok").onclick=async()=>{
+    const n=m.querySelector("#k_n").value.trim(), b=m.querySelector("#k_b").value;
+    if(!n){ toast("請填名字"); return; }
+    if(k){ k.name=n; k.birth=b; await dbPut("kids",k); }
+    else { const nk={id:uid(),name:n,birth:b,order:S.kids.length}; S.kids.push(nk); await dbPut("kids",nk); }
+    closeModal(); render();
+  };
+  const rm=m.querySelector("#k_rm");
+  if(rm) rm.onclick=async()=>{
+    const used=liveEntries().filter(e=>e.kidIds.includes(k.id)).length;
+    if(used){ toast("還有 "+used+" 篇日記掛在他身上，不能移除"); return; }
+    S.kids=S.kids.filter(x=>x.id!==k.id); await dbDel("kids",k.id);
+    if(S.filter===k.id) S.filter="all";
+    closeModal(); render();
+  };
+}
+
+/* ---- 最近刪除 ---- */
+function trashHTML(){
+  const list=S.entries.filter(e=>e.deleted).sort((a,b)=>b.deleted-a.deleted);
+  if(!list.length) return '<div class="empty-state">沒有已刪除的日記。</div>';
+  return '<p class="hint" style="margin:14px 0">超過 30 天會自動清除。</p>'+
+    list.map(e=>'<div class="card"><div class="meta"><span class="date">'+fmtDate(e.date)+"</span>"+
+      '<span class="age">'+(30-daysBetween(e.deleted,Date.now()))+" 天後清除</span></div>"+
+      '<p class="txt">'+(e.text?esc(e.text):"（無文字）")+"，"+e.photos.length+" 張照片</p>"+
+      '<div class="row" style="margin-top:8px"><button class="btn ghost sm" data-res="'+e.id+'">還原</button>'+
+      '<button class="btn danger sm" data-pg="'+e.id+'">永久刪除</button></div></div>').join("");
+}
+function bindTrash(){
+  document.querySelectorAll("[data-res]").forEach(b=>b.onclick=async()=>{
+    const e=S.entries.find(x=>x.id===b.dataset.res);
+    e.deleted=null; await dbPut("entries",e); render(); toast("已還原");
+  });
+  document.querySelectorAll("[data-pg]").forEach(b=>b.onclick=async()=>{
+    const e=S.entries.find(x=>x.id===b.dataset.pg);
+    for(const p of e.photos) await dbDel("photos",p.id);
+    await dbDel("entries",e.id);
+    S.entries=S.entries.filter(x=>x.id!==e.id);
+    render(); toast("已永久刪除");
+  });
+}
+
+/* ---------------- ZIP（store 法，零依賴） ---------------- */
+const CRC=(()=>{const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}
+  return t;})();
+function crc32(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=CRC[(c^u8[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function dosTime(d){ return ((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()/2))&0xFFFF; }
+function dosDate(d){ return (((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xFFFF; }
+async function makeZip(files){ // files: [{name, data:Uint8Array}]
+  const enc=new TextEncoder(), chunks=[], central=[]; let off=0;
+  const now=new Date(), tm=dosTime(now), dt=dosDate(now);
+  for(const f of files){
+    const nm=enc.encode(f.name), crc=crc32(f.data), sz=f.data.length;
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true);
+    lh.setUint16(8,0,true); lh.setUint16(10,tm,true); lh.setUint16(12,dt,true);
+    lh.setUint32(14,crc,true); lh.setUint32(18,sz,true); lh.setUint32(22,sz,true);
+    lh.setUint16(26,nm.length,true); lh.setUint16(28,0,true);
+    chunks.push(new Uint8Array(lh.buffer),nm,f.data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true);
+    ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true); ch.setUint16(12,tm,true); ch.setUint16(14,dt,true);
+    ch.setUint32(16,crc,true); ch.setUint32(20,sz,true); ch.setUint32(24,sz,true);
+    ch.setUint16(28,nm.length,true); ch.setUint32(42,off,true);
+    central.push(new Uint8Array(ch.buffer),nm);
+    off+=30+nm.length+sz;
+  }
+  const cstart=off;
+  let csize=0; central.forEach(c=>csize+=c.length);
+  const eo=new DataView(new ArrayBuffer(22));
+  eo.setUint32(0,0x06054b50,true); eo.setUint16(8,files.length,true); eo.setUint16(10,files.length,true);
+  eo.setUint32(12,csize,true); eo.setUint32(16,cstart,true);
+  return new Blob([...chunks,...central,new Uint8Array(eo.buffer)],{type:"application/zip"});
+}
+async function readZip(blob){
+  const buf=await blob.arrayBuffer(), v=new DataView(buf), u8=new Uint8Array(buf);
+  let eo=-1;
+  for(let i=buf.byteLength-22;i>=Math.max(0,buf.byteLength-66000);i--)
+    if(v.getUint32(i,true)===0x06054b50){ eo=i; break; }
+  if(eo<0) throw new Error("這不是有效的 zip 檔");
+  const n=v.getUint16(eo+10,true); let p=v.getUint32(eo+16,true);
+  const out={};
+  const dec=new TextDecoder();
+  for(let i=0;i<n;i++){
+    const method=v.getUint16(p+10,true), csz=v.getUint32(p+20,true);
+    const nl=v.getUint16(p+28,true), el=v.getUint16(p+30,true), cl=v.getUint16(p+32,true);
+    const lho=v.getUint32(p+42,true);
+    const name=dec.decode(u8.subarray(p+46,p+46+nl));
+    const lnl=v.getUint16(lho+26,true), lel=v.getUint16(lho+28,true);
+    const start=lho+30+lnl+lel;
+    let data=u8.subarray(start,start+csz);
+    if(method===8){
+      if(!self.DecompressionStream) throw new Error("這個瀏覽器無法解開壓縮過的 zip");
+      const ds=new DecompressionStream("deflate-raw");
+      data=new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer());
+    } else if(method!==0) throw new Error("不支援的壓縮方式");
+    out[name]=data;
+    p+=46+nl+el+cl;
+  }
+  return out;
+}
+async function doBackup(){
+  busy(true,"打包中…");
+  try{
+    const files=[];
+    const manifest={app:"babydiary",version:1,exported:new Date().toISOString(),
+      kids:S.kids,entries:S.entries};
+    files.push({name:"diary.json",data:new TextEncoder().encode(JSON.stringify(manifest,null,1))});
+    let i=0;
+    for(const e of S.entries){
+      for(const p of e.photos){
+        const rec=await dbGet("photos",p.id);
+        if(!rec||!rec.blob) continue;
+        files.push({name:"photos/"+p.id+".jpg",data:new Uint8Array(await rec.blob.arrayBuffer())});
+        if(++i%20===0) busy(true,"打包照片 "+i+"…");
+      }
+    }
+    const zip=await makeZip(files);
+    const name="寶寶日記_"+todayStr().replace(/-/g,"")+".zip";
+    const file=new File([zip],name,{type:"application/zip"});
+    busy(false);
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:name});
+    } else {
+      const a=document.createElement("a"); a.href=URL.createObjectURL(zip); a.download=name; a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),8000);
+    }
+    S.settings.lastBackup=Date.now(); await saveSettings(); render();
+    toast("備份完成（"+bytes(zip.size)+"）",3200);
+  }catch(err){
+    busy(false);
+    if(err && err.name==="AbortError"){ toast("已取消"); return; }
+    toast("備份失敗："+(err.message||err),4000);
+  }
+}
+$("zippicker").onchange=async ev=>{
+  const f=ev.target.files[0]; ev.target.value="";
+  if(!f) return;
+  busy(true,"讀取備份…");
+  try{
+    const files=await readZip(f);
+    if(!files["diary.json"]) throw new Error("備份檔裡找不到 diary.json");
+    const man=JSON.parse(new TextDecoder().decode(files["diary.json"]));
+    const haveE=new Set(S.entries.map(e=>e.id)), haveK=new Set(S.kids.map(k=>k.id));
+    let nk=0,ne=0;
+    for(const k of man.kids||[]) if(!haveK.has(k.id)){ await dbPut("kids",k); S.kids.push(k); nk++; }
+    for(const e of man.entries||[]){
+      if(haveE.has(e.id)) continue;
+      for(const p of e.photos||[]){
+        const d=files["photos/"+p.id+".jpg"];
+        if(d) await dbPut("photos",{id:p.id,blob:new Blob([d],{type:"image/jpeg"})});
+      }
+      await dbPut("entries",e); S.entries.push(e); ne++;
+    }
+    busy(false); render();
+    toast("還原完成：新增 "+ne+" 篇、"+nk+" 個孩子",3600);
+  }catch(err){ busy(false); toast("還原失敗："+(err.message||err),4200); }
+};
+
+/* ---------------- 導覽 ---------------- */
+$("fab").onclick=()=>newEntry();
+$("gear").onclick=()=>{ S.view="settings"; render(); };
+$("back").onclick=()=>{
+  if(S.view==="edit"){ $("e_cancel").click(); return; }
+  if(S.view==="trash"){ S.view="settings"; render(); return; }
+  S.view="timeline"; render();
+};
+
+/* ---------------- 啟動 ---------------- */
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+}
+window.addEventListener("beforeunload",()=>{ if(S.view==="edit") saveDraft(); });
+boot().catch(err=>{
+  $("view").innerHTML='<div class="empty-state">啟動失敗：'+esc(err.message||err)+
+    "<br>請確認瀏覽器允許網站儲存資料。</div>";
+});
+</script>
+</body>
+</html>
