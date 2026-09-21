@@ -176,7 +176,7 @@ textarea.inp{min-height:180px;resize:vertical;line-height:1.75}
 <script>
 "use strict";
 /* =========================================================================
-   寶寶日記 v1.0  (2026-09-21)
+   寶寶日記 v1.1  (2026-09-21)  備份改為兩段式
    單檔 PWA：資料全部存在手機瀏覽器 IndexedDB，不經任何伺服器。
    正式保存以匯出的 zip 備份檔為準。
    ========================================================================= */
@@ -774,7 +774,7 @@ function settingsHTML(){
       '<div class="kv"><span>照片佔用</span><span>'+bytes(total)+"</span></div>"+
       '<div class="kv"><span>最近刪除</span><span>'+del+" 篇</span></div>"+
       '<button class="btn ghost sm" id="go_trash" style="margin-top:8px">開啟最近刪除</button></div>'+
-    '<p class="hint" style="text-align:center;margin:18px 0">寶寶日記 v1.0　資料不上傳任何伺服器</p>';
+    '<p class="hint" style="text-align:center;margin:18px 0">寶寶日記 v1.1　資料不上傳任何伺服器</p>';
 }
 function bindSettings(){
   $("bk_share").onclick=doBackup;
@@ -915,19 +915,39 @@ async function doBackup(){
     }
     const zip=await makeZip(files);
     const name="寶寶日記_"+todayStr().replace(/-/g,"")+".zip";
-    const file=new File([zip],name,{type:"application/zip"});
     busy(false);
-    if(navigator.canShare && navigator.canShare({files:[file]})){
-      await navigator.share({files:[file],title:name});
-    } else {
-      const a=document.createElement("a"); a.href=URL.createObjectURL(zip); a.download=name; a.click();
-      setTimeout(()=>URL.revokeObjectURL(a.href),8000);
-    }
-    S.settings.lastBackup=Date.now(); await saveSettings(); render();
-    toast("備份完成（"+bytes(zip.size)+"）",3200);
+    /* 打包很花時間，打包完「按鈕的點擊」已經過期，瀏覽器會拒絕分享（Permission denied）。
+       所以打包完再請她按一次，用新的點擊去存檔。 */
+    const m=modal('<h3>備份檔準備好了</h3>'+
+      '<p class="hint">'+esc(name)+'（'+bytes(zip.size)+'）</p>'+
+      '<button class="btn" id="bk_dl" style="width:100%;margin-top:12px">存到手機</button>'+
+      '<p class="hint">會存進手機的「下載」資料夾。之後打開「雲端硬碟」App → ＋ → 上傳 → 選這個檔案。</p>'+
+      '<button class="btn ghost" id="bk_sh" style="width:100%;margin-top:12px">直接分享到其他 App</button>'+
+      '<p class="hint">有些手機不允許分享 zip，失敗的話會自動改成存到手機。</p>');
+    const done=async how=>{
+      S.settings.lastBackup=Date.now(); await saveSettings();
+      closeModal(); render();
+      toast(how==="dl"?"已存到「下載」資料夾，記得上傳到雲端硬碟":"備份完成",3800);
+    };
+    const download=()=>{
+      const a=document.createElement("a"); a.href=URL.createObjectURL(zip); a.download=name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+    };
+    m.querySelector("#bk_dl").onclick=()=>{ download(); done("dl"); };
+    m.querySelector("#bk_sh").onclick=async()=>{
+      const file=new File([zip],name,{type:"application/zip"});
+      try{
+        if(!(navigator.canShare && navigator.canShare({files:[file]}))) throw {name:"NotAllowedError"};
+        await navigator.share({files:[file],title:name});
+        done("sh");
+      }catch(err){
+        if(err && err.name==="AbortError"){ toast("已取消"); return; }
+        download(); done("dl");
+      }
+    };
   }catch(err){
     busy(false);
-    if(err && err.name==="AbortError"){ toast("已取消"); return; }
     toast("備份失敗："+(err.message||err),4000);
   }
 }
