@@ -1,6 +1,7 @@
-/* 寶寶日記 service worker v1.0
-   兩件事：(1) 離線可開  (2) 接住從 Google 相簿分享進來的照片 */
-const CACHE = "babydiary-v1";
+/* 寶寶日記 service worker v1.3
+   兩件事：(1) 離線可開  (2) 接住從 Google 相簿分享進來的照片
+   v1.3：開資料庫不指定版本，主程式升級資料庫時這裡不會打架 */
+const CACHE = "babydiary-v1.3";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest",
                 "./icon-192.png", "./icon-512.png", "./icon-maskable.png"];
 
@@ -16,7 +17,7 @@ self.addEventListener("activate", e => {
 /* --- 與主程式共用同一個 IndexedDB --- */
 function db() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open("babydiary", 1);
+    const r = indexedDB.open("babydiary");   // 不指定版本 = 開現有的版本
     r.onupgradeneeded = ev => {
       const d = ev.target.result;
       ["entries", "photos", "kids", "inbox"].forEach(n => {
@@ -24,11 +25,12 @@ function db() {
       });
       if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath: "k" });
     };
-    r.onsuccess = () => res(r.result);
+    r.onsuccess = () => { const d = r.result; d.onversionchange = () => d.close(); res(d); };
     r.onerror = () => rej(r.error);
   });
 }
 function putInbox(d, rec) {
+  if (!d.objectStoreNames.contains("inbox")) return Promise.reject(new Error("no inbox"));
   return new Promise((res, rej) => {
     const t = d.transaction("inbox", "readwrite");
     t.objectStore("inbox").put(rec);
@@ -54,7 +56,7 @@ self.addEventListener("fetch", event => {
             blob: f
           });
         }
-      } catch (e) { /* 壞掉就直接進主畫面，不要卡住使用者 */ }
+      } catch (e) { /* 壞掉就直接進主畫面，不要卡住使用者；主畫面診斷區看得到 inbox 狀態 */ }
       return Response.redirect("./?share=1", 303);
     })());
     return;
